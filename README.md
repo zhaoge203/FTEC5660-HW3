@@ -35,7 +35,7 @@ evidence on their own: check them against the database and the interviews.
 | Table | Columns |
 | --- | --- |
 | `company` | name, industry |
-| `industry_medians` | industry, revenue_growth_2y_pct, new_product_share_pct, new_product_sales_per_rd, operating_margin_pct (one row per industry; use the row for the company’s own industry) |
+| `industry_medians` | industry, revenue_growth_2y_pct, new_product_share_pct, new_product_sales_per_rd, operating_margin_pct (one row per industry; use the row for the company's own industry) |
 | `orders` | order_id, order_date, product, customer, amount, note (about 3,000 to 4,000 orders from January 2023 to June 2026; revenue is the sum of order amounts) |
 | `products` | product, launch_date |
 | `monthly_costs` | month, cost_of_sales, selling_admin, research_development |
@@ -61,7 +61,7 @@ evidence on their own: check them against the database and the interviews.
 | Capex | Capital expenditure: spending on factories, machines and other long-term assets. `capex_plan` holds the planned capex for 2026 to 2028. |
 | Return rate | Units returned ÷ units shipped, from the `returns` table. |
 | Industry median | The middle value for companies in the same industry, from `industry_medians`. |
-| Insider | A director or senior manager of the company. `insider_trades` lists the shares they bought (buy) or sold (sell). |
+| Insider | A director or senior manager of the company. `insider_trades` lists the shares they bought (`buy`) or sold (`sell`). |
 | Earnings call | A meeting each quarter where management presents the quarter's results to investors. Each call quotes that quarter's revenue. |
 
 **Interviews.** Roles: `customer`, `current_employee`, `former_employee`,
@@ -83,7 +83,7 @@ is enough.
 
 ## Choose your 3 points and your rules
 
-Pick any 3 of the 15 points and write them in `CHOSEN_POINTS` near the
+Pick any 3 of Fisher's 15 points and write them in `CHOSEN_POINTS` near the
 top of `hw3.py`, e.g. `CHOSEN_POINTS = [1, 7, 15]`. The full questions are in
 `FISHER_POINTS` in `hw3.py` and in the book.
 
@@ -113,7 +113,7 @@ We grade your verdicts against our own answer key. It uses one fixed rule per
 point, which we do not publish, and the data never puts a company close to
 the line of that rule, so a sensible reading of Fisher usually gives the same
 answer. **Test your rules on the public answers**:
-`public_test/ground_truth.json` gives the expected verdicts on all 15 points
+`public_test/ground_truth.json` gives the expected verdict on all 15 points
 for each of the 20 public companies, and every point fails in 6 of them. If
 your rule disagrees with the public answers, rethink it.
 

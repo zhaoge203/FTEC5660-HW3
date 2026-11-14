@@ -244,7 +244,7 @@ def make_tools(company_folder: Path) -> list[Any]:
           quarterly_cash(quarter, operating_cash_flow, capex, cash_end)
           capex_plan(year, planned_capex)
           returns(month, units_shipped, units_returned)
-          insider_trades(trade_date, person, title, side (buy or sell), shares, price)
+          insider_trades(trade_date, person, title, side, shares, price)
         Use SUM, GROUP BY and WHERE to compute totals rather than reading raw rows.
         """
         try:
