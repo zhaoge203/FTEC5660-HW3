@@ -57,60 +57,136 @@ def load_env_file(path: Path = Path(".env")) -> None:
 
 # Choose any 3 of the 15 points, e.g. CHOSEN_POINTS = [1, 7, 15]. Your agent
 # gives a PASS or FAIL verdict on these 3 points only, with your own rule for each.
-CHOSEN_POINTS: list[int] = []  ### YOUR CODE HERE
+CHOSEN_POINTS: list[int] = [1, 2, 5]
+
+
+# Every metric and threshold is calculated by SQLite through the supplied tool.
+METRIC_QUERIES = {
+    1: """
+        WITH r AS (
+          SELECT
+            SUM(CASE WHEN order_date >= '2023-01-01' AND order_date < '2024-01-01'
+                     THEN amount ELSE 0 END) AS revenue_2023,
+            SUM(CASE WHEN order_date >= '2025-01-01' AND order_date < '2026-01-01'
+                     THEN amount ELSE 0 END) AS revenue_2025
+          FROM orders
+        )
+        SELECT 100.0 * (r.revenue_2025 / r.revenue_2023 - 1.0) AS growth_pct,
+               m.revenue_growth_2y_pct AS threshold
+        FROM r CROSS JOIN company c
+        JOIN industry_medians m ON m.industry = c.industry
+    """,
+    2: """
+        WITH r AS (
+          SELECT
+            SUM(CASE WHEN p.launch_date >= '2023-01-01' THEN o.amount ELSE 0 END) AS new_revenue,
+            SUM(o.amount) AS revenue
+          FROM orders o JOIN products p ON p.product = o.product
+          WHERE o.order_date >= '2025-01-01' AND o.order_date < '2026-01-01'
+        )
+        SELECT 100.0 * r.new_revenue / r.revenue AS new_product_share_pct,
+               m.new_product_share_pct AS threshold
+        FROM r CROSS JOIN company c
+        JOIN industry_medians m ON m.industry = c.industry
+    """,
+    5: """
+        WITH r AS (
+          SELECT SUM(amount) AS revenue FROM orders
+          WHERE order_date >= '2025-01-01' AND order_date < '2026-01-01'
+        ),
+        c AS (
+          SELECT SUM(cost_of_sales) AS cost_of_sales,
+                 SUM(selling_admin) AS selling_admin,
+                 SUM(research_development) AS research_development
+          FROM monthly_costs WHERE month >= '2025-01' AND month < '2026-01'
+        )
+        SELECT 100.0 * (r.revenue - c.cost_of_sales - c.selling_admin - c.research_development)
+                   / r.revenue AS operating_margin_pct,
+               m.operating_margin_pct AS threshold
+        FROM r CROSS JOIN c CROSS JOIN company co
+        JOIN industry_medians m ON m.industry = co.industry
+    """,
+}
+
+SUMMARY_PROMPT = """You are the reporting stage of a Fisher investment agent. Write at most two
+sentences (55 words) explaining the supplied point 1, 2 and 5 verdicts using only the metrics.
+Do not change a verdict, invent facts or use company names. State that comparisons are with industry medians.
+"""
 
 
 def build_agent() -> Any:
-    """Create and return your model or agent once.
+    """Create the required DeepSeek model once for concise evidence summaries."""
+    from langchain_deepseek import ChatDeepSeek
 
-    Suggested imports:
-        from langchain_deepseek import ChatDeepSeek
-        from langchain.agents import create_agent
+    return ChatDeepSeek(
+        model=MODEL_NAME,
+        temperature=0,
+        max_tokens=350,
+        timeout=90,
+        max_retries=2,
+    )
 
-    Use the DeepSeek model named by ``MODEL_NAME``. The API key is loaded
-    from .env. Each company has its own tools (see ``analyze_companies``), so
-    you will probably create one tool-calling agent per company there.
-    """
-    ### YOUR CODE HERE
-    return None
+
+def read_metric(raw: str) -> tuple[float, float]:
+    """Parse the single value/threshold row returned by sql_query."""
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if raw.startswith("SQL error:") or len(lines) < 2:
+        raise ValueError(f"Unexpected SQL tool response: {raw[:160]}")
+    cells = [cell.strip() for cell in lines[1].split("|")]
+    return float(cells[0]), float(cells[1])
 
 
 async def analyze_companies(agent: Any, companies: dict[str, list[Any]]) -> dict[str, dict[str, Any]]:
-    """Run your agent and return its verdicts on CHOSEN_POINTS for every company.
+    """Route points to SQL rules in parallel; use the LLM only for the narrative."""
 
-    ``companies`` maps each company folder name to its four LangChain tools:
+    semaphore = asyncio.Semaphore(4)
 
-        list_documents()             names and dates of the company's documents
-        read_document(name)          the text of one document
-        sql_query(query)             one read-only SQLite query on company.db
-        interview(role, topic)       one interview answer (INTERVIEW_LIMIT per company)
+    async def analyze_one(name: str, tools: list[Any]) -> tuple[str, dict[str, Any]]:
+        async with semaphore:
+            try:
+                sql_query = tools[2]
+                rows = await asyncio.gather(*(
+                    asyncio.to_thread(sql_query.invoke, {"query": METRIC_QUERIES[point]})
+                    for point in CHOSEN_POINTS
+                ))
+                metrics = dict(zip(CHOSEN_POINTS, map(read_metric, rows)))
+                points = {
+                    point: "PASS" if metrics[point][0] >= metrics[point][1] else "FAIL"
+                    for point in CHOSEN_POINTS
+                }
+                fallback = "; ".join(
+                    f"Point {point} {points[point]} ({metrics[point][0]:.2f} vs "
+                    f"industry median {metrics[point][1]:.2f})"
+                    for point in CHOSEN_POINTS
+                ) + "."
+                try:
+                    response = await agent.ainvoke([
+                        ("system", SUMMARY_PROMPT),
+                        ("human", json.dumps({
+                            "points": points,
+                            "metrics_and_industry_medians": metrics,
+                        })),
+                    ])
+                    summary = str(response.content).strip()
+                    summary_lower = summary.lower()
+                    if (
+                        not summary
+                        or summary[-1] not in ".!?"
+                        or any(f"point {point}" not in summary_lower for point in CHOSEN_POINTS)
+                    ):
+                        summary = fallback
+                except Exception:
+                    summary = fallback
+                return name, {"points": points, "summary": summary}
+            except Exception as exc:
+                # A company-level failure must not prevent results.csv from being written.
+                return name, {
+                    "points": {point: "FAIL" for point in CHOSEN_POINTS},
+                    "summary": f"Analysis unavailable ({type(exc).__name__}); conservative fallback used.",
+                }
 
-    Give the tools to a tool-calling agent, e.g.
-    ``create_agent(model, tools=companies[name], system_prompt=...)``, or call
-    them yourself with ``tool.invoke({...})``. The README explains the
-    documents, the database tables and the interview roles and topics.
-
-    Return one dictionary per company folder name, e.g. with
-    CHOSEN_POINTS = [1, 7, 15]:
-
-        {
-            "hollins_group": {
-                "points": {1: "PASS", 7: "FAIL", 15: "PASS"},
-                "summary": "Two or three sentences explaining the verdicts.",
-            },
-            ...
-        }
-
-    Each chosen point needs a verdict ("PASS" or "FAIL"; True/False also
-    works). Other points are ignored.
-
-    Catch errors per company (e.g. a failed API call) and still return an
-    entry for it: an exception here means no results.csv, which scores zero.
-    You may analyse companies in parallel (e.g. ``asyncio.gather``).
-    """
-    ### YOUR CODE HERE
-    _ = agent
-    return {name: {"points": {}, "summary": ""} for name in companies}
+    pairs = await asyncio.gather(*(analyze_one(name, tools) for name, tools in companies.items()))
+    return dict(pairs)
 
 
 # Everything below is provided runner/scoring code. No edits are needed.
@@ -168,7 +244,7 @@ def make_tools(company_folder: Path) -> list[Any]:
           quarterly_cash(quarter, operating_cash_flow, capex, cash_end)
           capex_plan(year, planned_capex)
           returns(month, units_shipped, units_returned)
-          insider_trades(trade_date, person, title, side, shares, price)
+          insider_trades(trade_date, person, title, side (buy or sell), shares, price)
         Use SUM, GROUP BY and WHERE to compute totals rather than reading raw rows.
         """
         try:

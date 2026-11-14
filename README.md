@@ -35,7 +35,7 @@ evidence on their own: check them against the database and the interviews.
 | Table | Columns |
 | --- | --- |
 | `company` | name, industry |
-| `industry_medians` | industry, revenue_growth_2y_pct, new_product_share_pct, new_product_sales_per_rd, operating_margin_pct (one row per industry; use the row for the company's own industry) |
+| `industry_medians` | industry, revenue_growth_2y_pct, new_product_share_pct, new_product_sales_per_rd, operating_margin_pct (one row per industry; use the row for the company’s own industry) |
 | `orders` | order_id, order_date, product, customer, amount, note (about 3,000 to 4,000 orders from January 2023 to June 2026; revenue is the sum of order amounts) |
 | `products` | product, launch_date |
 | `monthly_costs` | month, cost_of_sales, selling_admin, research_development |
@@ -61,7 +61,7 @@ evidence on their own: check them against the database and the interviews.
 | Capex | Capital expenditure: spending on factories, machines and other long-term assets. `capex_plan` holds the planned capex for 2026 to 2028. |
 | Return rate | Units returned ÷ units shipped, from the `returns` table. |
 | Industry median | The middle value for companies in the same industry, from `industry_medians`. |
-| Insider | A director or senior manager of the company. `insider_trades` lists the shares they bought (`buy`) or sold (`sell`). |
+| Insider | A director or senior manager of the company. `insider_trades` lists the shares they bought (buy) or sold (sell). |
 | Earnings call | A meeting each quarter where management presents the quarter's results to investors. Each call quotes that quarter's revenue. |
 
 **Interviews.** Roles: `customer`, `current_employee`, `former_employee`,
@@ -83,7 +83,7 @@ is enough.
 
 ## Choose your 3 points and your rules
 
-Pick any 3 of Fisher's 15 points and write them in `CHOSEN_POINTS` near the
+Pick any 3 of the 15 points and write them in `CHOSEN_POINTS` near the
 top of `hw3.py`, e.g. `CHOSEN_POINTS = [1, 7, 15]`. The full questions are in
 `FISHER_POINTS` in `hw3.py` and in the book.
 
@@ -113,7 +113,7 @@ We grade your verdicts against our own answer key. It uses one fixed rule per
 point, which we do not publish, and the data never puts a company close to
 the line of that rule, so a sensible reading of Fisher usually gives the same
 answer. **Test your rules on the public answers**:
-`public_test/ground_truth.json` gives the expected verdict on all 15 points
+`public_test/ground_truth.json` gives the expected verdicts on all 15 points
 for each of the 20 public companies, and every point fails in 6 of them. If
 your rule disagrees with the public answers, rethink it.
 
@@ -170,14 +170,38 @@ for each public company. Grading uses a private set of about 20 unseen
 companies with the same tools and the same answer key rules, but different
 names and wording, and scores your 3 points only.
 
-## Homework 3 solution:
-> to students: this is your report, see the homework description.
+## Homework 3 solution
 
 ### My 3 points and rules
-> for each point: why you chose it, your PASS rule in one or two sentences, and the evidence it uses. Quote Fisher where it helps.
+
+- **Point 1 — market potential.** I chose it because long-term sales growth is central to Fisher's question about products with “sufficient market potential.” PASS if FY2023–FY2025 revenue growth is at least the company's industry median; evidence comes from `orders` and `industry_medians`.
+- **Point 2 — new products.** This tests whether sales can continue after current lines mature. PASS if products launched in 2023 or later contribute an FY2025 revenue share at least equal to the industry median; evidence comes from `orders`, `products`, and `industry_medians`.
+- **Point 5 — worthwhile profit margin.** I chose it to complement growth with economic quality. PASS if FY2025 operating margin, calculated as revenue less cost of sales, selling/admin, and R&D divided by revenue, is at least the industry median.
 
 ### Design
-> a visualization of your agent design and one paragraph describing it.
+
+```mermaid
+flowchart LR
+    A[Company tools] --> B[SQL query router]
+    B --> C[Point 1: revenue growth]
+    B --> D[Point 2: new-product share]
+    B --> E[Point 5: operating margin]
+    C --> F[Python threshold checks]
+    D --> F
+    E --> F
+    F --> G[PASS/FAIL verdicts]
+    F --> H[DeepSeek summary chain]
+    H --> I[Short evidence-based summary]
+```
+
+For each company, three aggregate SQL queries compute the metrics and obtain the matching industry medians. Python applies the fixed `value >= median` rule, while one LangChain DeepSeek call writes the summary without controlling verdicts. Four companies run concurrently; SQL and model errors are isolated per company, and a deterministic summary remains available if the model fails.
 
 ### Results
-> your point score on `public_test`, the companies where your verdicts disagree with the public answers, and why.
+
+On `public_test`, the agent scored **60/60 points, with 100.0% balanced accuracy**. There were **no disagreements** with the public answers. All three rules use the supplied industry benchmarks directly, avoiding subjective thresholds and model arithmetic.
+
+## Task 2: Reflection — AI sycophancy and AI psychosis
+
+AI sycophancy is the tendency to agree with a user's beliefs rather than test them. It can make a fluent answer feel validating while weakening independent judgment. In prolonged exchanges, this feedback loop may reinforce distorted thinking; “AI psychosis” should therefore be treated as a concern about vulnerable users' loss of reality testing, not as a diagnosis of the model.
+
+This homework suggests a practical safeguard: separate evidence and calculation from narration. My agent derives verdicts from explicit SQL rules, so the language model cannot change a result merely to produce a more pleasing story. More broadly, AI systems should express calibrated disagreement, show evidence and uncertainty, avoid presenting themselves as conscious companions, and encourage real-world or professional support when a conversation suggests serious distress.
